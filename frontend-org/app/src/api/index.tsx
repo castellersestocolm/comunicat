@@ -513,7 +513,7 @@ export const apiEventRegistrationCreate = async (
             }),
       ...(ownerId ? { owner_id: ownerId } : {}),
       event_id: eventId,
-      token: token,
+      ...(token ? { token: token } : {}),
       status: status,
       data: data,
     });
@@ -524,9 +524,19 @@ export const apiEventRegistrationCreate = async (
   }
 };
 
-export const apiEventRegistrationDelete = async (id: string) => {
+export const apiEventRegistrationDelete = async (
+  registrationId: string,
+  token: string = undefined,
+) => {
   try {
-    return await instance.delete("/event/registration/" + id + "/");
+    return await instance.delete(
+      "/event/registration/" + registrationId + "/",
+      {
+        params: {
+          ...(token ? { token: token } : {}),
+        },
+      },
+    );
   } catch (error) {
     console.error("Error fetching data: ", error);
     // Handle errors here or throw them to be handled where the function is called
@@ -575,15 +585,19 @@ export const apiEventPage = async (
   date: string = undefined,
   code: string = undefined,
   token: string = undefined,
+  entityToken: string = undefined,
 ) => {
   try {
     return await instance.get("/event/page/", {
-      params: token
-        ? { token: token }
-        : {
-            date: date,
-            code: code,
-          },
+      params: {
+        ...(entityToken ? { entity_token: entityToken } : {}),
+        ...(token
+          ? { token: token }
+          : {
+              date: date,
+              code: code,
+            }),
+      },
     });
   } catch (error) {
     console.error("Error fetching data: ", error);
@@ -677,6 +691,18 @@ export const apiContactMessageCreate = async (
       entity: entity,
       type: type,
       message: message,
+    });
+  } catch (error) {
+    console.error("Error fetching data: ", error);
+    // Handle errors here or throw them to be handled where the function is called
+    throw error;
+  }
+};
+
+export const apiPaymentEntityMe = async (token: string = undefined) => {
+  try {
+    return await instance.get("/payment/entity/me/", {
+      params: { token: token },
     });
   } catch (error) {
     console.error("Error fetching data: ", error);

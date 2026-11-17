@@ -65,7 +65,13 @@ interface CreateFormElement extends HTMLFormElement {
   readonly elements: FormElements;
 }
 
-export default function FormEventRegister({ event }: any) {
+export default function FormEventRegister({
+  event,
+  family,
+  entity,
+  entityToken,
+  registrationStatus,
+}: any) {
   const [t, i18n] = useTranslation("common");
 
   const { user, setMessages } = useAppContext();
@@ -75,6 +81,7 @@ export default function FormEventRegister({ event }: any) {
   const [validationErrors, setValidationErrors] = useState(undefined);
   const [isLoadingUsers, setIsLoadingUsers] = useState(true);
   const [isLoadingRegistrations, setIsLoadingRegistrations] = useState(true);
+  const [isChangingRegistrations, setIsChangingRegistrations] = useState(true);
   const [extraOpen, setExtraOpen] = useState(false);
   const [registrations, setRegistrations] = useState(undefined);
   const [entityUsers, setEntityUsers] = useState([]);
@@ -120,21 +127,29 @@ export default function FormEventRegister({ event }: any) {
   };
 
   React.useEffect(() => {
-    if (user && user.family && user.family.members) {
+    if (family && family.members) {
       setEntityUsers(
-        user.family.members.map((member: any) => [
-          member.user.entity,
-          member.user,
-        ]),
+        family.members.map((member: any) => [member.user.entity, member.user]),
       );
+    }
+    if (entity) {
+      setOwnerEntity(entity);
+      if (!family || !family.members) {
+        setEntityUsers([[entity, undefined]]);
+      }
+    } else if (user) {
       setOwnerEntity(user.entity);
+      if (!family || !family.members) {
+        setEntityUsers([[user.entity, user]]);
+      }
     }
     setIsLoadingUsers(false);
-  }, [user, setEntityUsers, setIsLoadingUsers, setOwnerEntity]);
+  }, [user, family, entity, setEntityUsers, setIsLoadingUsers, setOwnerEntity]);
 
   React.useEffect(() => {
     if (!isLoadingUsers && event && event.registrations) {
       setRegistrations(event.registrations);
+
       const entityIds = entityUsers.map((entityUser: any) => entityUser[0].id);
       const currentExtraEntityUsers = event.registrations
         .filter(
@@ -153,6 +168,79 @@ export default function FormEventRegister({ event }: any) {
     setIsLoadingRegistrations,
   ]);
 
+  React.useEffect(() => {
+    if (!isLoadingRegistrations && isChangingRegistrations && registrations) {
+      if (registrationStatus && entity) {
+        const registrationStatusInt = parseInt(registrationStatus);
+        for (let i = 0; i < event.registrations.length; i++) {
+          const registration = event.registrations[i];
+          if (
+            registrationStatusInt === RegistrationStatus.ACTIVE &&
+            (!registration || registration.status !== RegistrationStatus.ACTIVE)
+          ) {
+            apiEventRegistrationCreate(
+              undefined,
+              registration.entity.id,
+              entity && entity.id,
+              event.id,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              entityToken,
+            ).then((response) => {
+              if (response.status === 200) {
+                setRegistrations((currentRegistrations: any[]) => [
+                  ...(currentRegistrations
+                    ? currentRegistrations.filter(
+                        (currentRegistration: any) =>
+                          currentRegistration.id !== response.data.id,
+                      )
+                    : []),
+                  response.data,
+                ]);
+              }
+            });
+          } else if (
+            registrationStatusInt === RegistrationStatus.CANCELLED &&
+            registration &&
+            registration.status === RegistrationStatus.ACTIVE
+          ) {
+            apiEventRegistrationDelete(registration.id, entityToken).then(
+              (response) => {
+                if (response.status === 200) {
+                  setRegistrations((currentRegistrations: any[]) => [
+                    ...(currentRegistrations
+                      ? currentRegistrations.filter(
+                          (currentRegistration: any) =>
+                            currentRegistration.id !== response.data.id,
+                        )
+                      : []),
+                    response.data,
+                  ]);
+                }
+              },
+            );
+          }
+        }
+      }
+      setIsChangingRegistrations(false);
+    }
+  }, [
+    event,
+    registrations,
+    isLoadingRegistrations,
+    entity,
+    registrationStatus,
+    entityToken,
+    setRegistrations,
+    setIsChangingRegistrations,
+    apiEventRegistrationCreate,
+    apiEventRegistrationDelete,
+  ]);
+
   function handleSubmit(e: React.FormEvent<CreateFormElement>) {
     e.preventDefault();
     apiEventRegistrationCreate(
@@ -166,7 +254,7 @@ export default function FormEventRegister({ event }: any) {
       formData.isUnderage ? undefined : formData.phone,
       formData.birthday,
       i18n.resolvedLanguage,
-      undefined,
+      entityToken,
       undefined,
       { questions: formData.questions },
     ).then((response) => {
@@ -281,6 +369,13 @@ export default function FormEventRegister({ event }: any) {
         undefined,
         ownerEntity && ownerEntity.id,
         eventId,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        entityToken,
       ).then((response) => {
         if (response.status === 200) {
           setRegistrations([
@@ -307,12 +402,21 @@ export default function FormEventRegister({ event }: any) {
         entityId,
         ownerEntity && ownerEntity.id,
         eventId,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        entityToken,
       ).then((response) => {
         if (response.status === 200) {
           setRegistrations([
-            ...registrations.filter(
-              (registration: any) => registration.id !== response.data.id,
-            ),
+            ...(registrations
+              ? registrations.filter(
+                  (registration: any) => registration.id !== response.data.id,
+                )
+              : []),
             response.data,
           ]);
           if (!ownerEntity) {
@@ -324,13 +428,17 @@ export default function FormEventRegister({ event }: any) {
   }
 
   function handleRegistrationDelete(registrationId: string) {
-    apiEventRegistrationDelete(registrationId).then((response) => {
+    apiEventRegistrationDelete(registrationId, entityToken).then((response) => {
       if (response.status === 200) {
-        setRegistrations(
-          registrations.map((registration: any) =>
-            registration.id === response.data.id ? response.data : registration,
-          ),
-        );
+        if (registrations) {
+          setRegistrations(
+            registrations.map((registration: any) =>
+              registration.id === response.data.id
+                ? response.data
+                : registration,
+            ),
+          );
+        }
         setFormDataEmpty();
       }
     });
@@ -457,7 +565,9 @@ export default function FormEventRegister({ event }: any) {
               </Typography>
             </Box>
             <Divider />
-            {isLoadingUsers || isLoadingRegistrations ? (
+            {isLoadingUsers ||
+            isLoadingRegistrations ||
+            isChangingRegistrations ? (
               <Box className={styles.loader}>
                 <LoaderClip />
               </Box>
@@ -517,6 +627,8 @@ export default function FormEventRegister({ event }: any) {
                                           </Typography>
                                           {registration &&
                                             registration.price &&
+                                            registration.price.amount.amount >
+                                              0 &&
                                             registration.status !==
                                               RegistrationStatus.CANCELLED && (
                                               <Typography
@@ -607,7 +719,7 @@ export default function FormEventRegister({ event }: any) {
                                               : "primary"
                                           }
                                           disabled={
-                                            !user ||
+                                            (!user && !entityToken) ||
                                             (formData.entity &&
                                               formData.entity.id ===
                                                 entity.id) ||

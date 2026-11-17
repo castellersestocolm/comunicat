@@ -10,7 +10,12 @@ import {
 } from "@mui/material";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
-import { apiEventPage, apiMembershipList } from "../../api";
+import {
+  apiEventPage,
+  apiMembershipList,
+  apiUserFamily,
+  apiPaymentEntityMe,
+} from "../../api";
 import { Module } from "../../enums";
 import markdown from "@wcj/markdown-to-html";
 import PageBase from "../../components/PageBase/PageBase";
@@ -19,7 +24,7 @@ import PageImageHero from "../../components/PageImageHero/PageImageHero";
 import FormEventPrices from "../../components/FormEventPrices/FormEventPrices";
 import FormEventRegister from "../../components/FormEventRegister/FormEventRegister";
 import Map from "../../components/Map/Map";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import Box from "@mui/material/Box";
 import Grid from "@mui/material/Grid";
 import { datetimeToLongString } from "../../utils/datetime";
@@ -35,29 +40,44 @@ function CalendarEventPage() {
   const [t, i18n] = useTranslation("common");
   const { year, month, day, code, token } = useParams();
 
+  const [searchParams] = useSearchParams();
+  const entityToken = searchParams.get("entityToken");
+  const registrationStatus = searchParams.get("registrationStatus");
+
   const [event, setEvent] = React.useState(undefined);
   const [membership, setMembership] = React.useState(undefined);
+  const [family, setFamily] = React.useState(undefined);
+  const [entity, setEntity] = React.useState(undefined);
 
   const { user } = useAppContext();
 
   React.useEffect(() => {
-    if (token) {
-      apiEventPage(undefined, undefined, token).then((response) => {
+    if (user) {
+      setFamily(user.family);
+    } else if (entityToken !== undefined) {
+      apiUserFamily(entityToken).then((response) => {
         if (response.status === 200) {
-          const currentEvent = response.data;
-
-          if (currentEvent.module === Module.TOWERS) {
-            window.location.href =
-              TOWERS_BASE_URL +
-              ROUTES["calendar-event-signup"].path.replace(":token", token);
-          }
-
-          setEvent(currentEvent);
+          setFamily(response.data);
         }
       });
-    } else {
-      const date = new Date(year + "-" + month + "-" + day);
-      apiEventPage(date.toISOString().substring(0, 10), code).then(
+    }
+  }, [user, setFamily, entityToken]);
+
+  React.useEffect(() => {
+    if (user) {
+      setEntity(user.entity);
+    } else if (entityToken !== undefined) {
+      apiPaymentEntityMe(entityToken).then((response) => {
+        if (response.status === 200) {
+          setEntity(response.data);
+        }
+      });
+    }
+  }, [user, setEntity, entityToken]);
+
+  React.useEffect(() => {
+    if (token) {
+      apiEventPage(undefined, undefined, token, entityToken).then(
         (response) => {
           if (response.status === 200) {
             const currentEvent = response.data;
@@ -65,19 +85,48 @@ function CalendarEventPage() {
             if (currentEvent.module === Module.TOWERS) {
               window.location.href =
                 TOWERS_BASE_URL +
-                ROUTES["calendar-event"].path
-                  .replace(":year", year)
-                  .replace(":month", month)
-                  .replace(":day", day)
-                  .replace(":code", code);
+                ROUTES["calendar-event-signup"].path.replace(":token", token);
             }
 
             setEvent(currentEvent);
           }
         },
       );
+    } else {
+      const date = new Date(year + "-" + month + "-" + day);
+      apiEventPage(
+        date.toISOString().substring(0, 10),
+        code,
+        undefined,
+        entityToken,
+      ).then((response) => {
+        if (response.status === 200) {
+          const currentEvent = response.data;
+
+          if (currentEvent.module === Module.TOWERS) {
+            window.location.href =
+              TOWERS_BASE_URL +
+              ROUTES["calendar-event"].path
+                .replace(":year", year)
+                .replace(":month", month)
+                .replace(":day", day)
+                .replace(":code", code);
+          }
+
+          setEvent(currentEvent);
+        }
+      });
     }
-  }, [setEvent, year, month, day, code, token, i18n.resolvedLanguage]);
+  }, [
+    setEvent,
+    year,
+    month,
+    day,
+    code,
+    token,
+    entityToken,
+    i18n.resolvedLanguage,
+  ]);
 
   React.useEffect(() => {
     if (user) {
@@ -152,7 +201,11 @@ function CalendarEventPage() {
       (event.agenda_items && event.agenda_items.length > 0) ||
       (event.links && event.links.length > 0));
   const hasContentPrices =
-    event && !token && event.prices && event.prices.length > 0;
+    event &&
+    !token &&
+    event.prices &&
+    event.prices.filter((eventPrice: any) => eventPrice.amount.amount > 0)
+      .length > 0;
   const hasContentSignup =
     event && event.require_signup && event.require_approve;
   const hasContentPoster =
@@ -290,7 +343,13 @@ function CalendarEventPage() {
               </Box>
               {eventSignup ? (
                 eventSignup.is_open ? (
-                  <FormEventRegister event={event} />
+                  <FormEventRegister
+                    event={event}
+                    family={family}
+                    entity={entity}
+                    entityToken={entityToken}
+                    registrationStatus={registrationStatus}
+                  />
                 ) : (
                   <>
                     <Typography variant="body1" align="center" mb={1}>

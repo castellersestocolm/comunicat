@@ -13,7 +13,7 @@ import user.api
 import user.api.event
 from comunicat.enums import Module
 from consent.enums import ConsentType
-from event.enums import EventStatus, EventType, RegistrationStatus
+from event.enums import EventReminderStatus, EventStatus, EventType, RegistrationStatus
 from event.fields import EventEconomyStats, EventRegistrationsStats, EventStats
 from event.models import (
     AgendaItem,
@@ -23,7 +23,10 @@ from event.models import (
     EventModule,
     EventPrice,
     EventQuestion,
+    EventReminder,
+    EventSeries,
     EventSignup,
+    Location,
     Registration,
 )
 from legal.enums import TeamType
@@ -40,6 +43,7 @@ def get_list(  # noqa: C901
     code: str | None = None,
     token: str | None = None,
     request_user_id: UUID | None = None,
+    request_entity_id: UUID | None = None,
     date_from: datetime.date | None = None,
     date_to: datetime.date | None = None,
     with_counts: bool = False,
@@ -113,7 +117,13 @@ def get_list(  # noqa: C901
     registration_filter = Q(entity__user_id__in=family_user_ids)
 
     if request_user_id:
-        registration_filter |= Q(owner__user_id=request_user_id)
+        registration_filter |= Q(
+            Q(owner__user_id=request_user_id) | Q(entity__user_id=request_user_id)
+        )
+    elif request_entity_id:
+        registration_filter |= Q(
+            Q(owner_id=request_entity_id) | Q(entity_id=request_entity_id)
+        )
 
     event_qs = (
         Event.objects.filter(
@@ -188,7 +198,7 @@ def get_list(  # noqa: C901
                     )
                     .select_related("entity", "entity__user")
                     .with_amount()
-                    if request_user_id
+                    if request_user_id or request_entity_id
                     else Registration.objects.none()
                 ),
             ),
@@ -315,6 +325,7 @@ def get(
     code: str | None = None,
     token: str | None = None,
     request_user_id: UUID | None = None,
+    request_entity_id: UUID | None = None,
 ) -> Event | None:
     return (
         get_list(
@@ -324,6 +335,7 @@ def get(
             token=token,
             module=module,
             request_user_id=request_user_id,
+            request_entity_id=request_entity_id,
         )
         + [None]
     )[0]
@@ -571,3 +583,84 @@ def get_stats(event_id: UUID) -> EventStats:
             amount_spent_total=event_obj.economy_amount_spent_total,
         ),
     )
+
+
+# TODO: Expand this to also update from event series and remove it from the save model
+def get_create_from_event_series(
+    event_series_id: UUID,
+    time_from: datetime.datetime,
+    time_to: datetime.datetime,
+    status: EventStatus,
+    location: Location | None = None,
+) -> Event:
+    event_series_obj = (
+        EventSeries.objects.filter(id=event_series_id)
+        .prefetch_related("modules", "signups", "reminders", "prices")
+        .first()
+    )
+
+    time_now = timezone.now()
+
+    event_obj = Event.objects.create(
+        title=event_series_obj.event_title,
+        description=event_series_obj.description,
+        type=event_series_obj.type,
+        module=event_series_obj.module,
+        theme=event_series_obj.theme,
+        time_from=time_from,
+        time_to=time_to,
+        location=location,
+        series=event_series_obj,
+        status=status,
+    )
+
+    for event_series_module_obj in event_series_obj.modules.all():
+        EventModule.objects.create(
+            event=event_obj,
+            module=event_series_module_obj.module,
+            team=event_series_module_obj.team,
+            require_signup=event_series_module_obj.require_signup,
+            require_approve=event_series_module_obj.require_approve,
+            require_user=event_series_module_obj.require_user,
+        )
+
+    for event_series_signup_obj in event_series_obj.signups.all():
+        EventSignup.objects.create(
+            event=event_obj,
+            module=event_series_signup_obj.module,
+            time_from=event_obj.time_from
+            - timezone.timedelta(days=event_series_signup_obj.days_before_from),
+            time_to=event_obj.time_from
+            - timezone.timedelta(days=event_series_signup_obj.days_before_to),
+            max_registrations=event_series_signup_obj.max_registrations,
+        )
+
+    for event_series_reminder_obj in event_series_obj.reminders.all():
+        event_reminder_time = event_obj.time_from - timezone.timedelta(
+            days=event_series_reminder_obj.days_before
+        )
+
+        EventReminder.objects.create(
+            event=event_obj,
+            module=event_series_reminder_obj.module,
+            newsletter=event_series_reminder_obj.newsletter,
+            template=event_series_reminder_obj.template,
+            status=(
+                EventReminderStatus.SCHEDULED
+                if event_reminder_time >= time_now
+                else EventReminderStatus.SKIPPED
+            ),
+            time=event_reminder_time,
+        )
+
+    for event_series_price_obj in event_series_obj.prices.all():
+        EventPrice.objects.create(
+            event=event_obj,
+            module=event_series_price_obj.module,
+            age_from=event_series_price_obj.age_from,
+            age_to=event_series_price_obj.age_to,
+            min_registrations=event_series_price_obj.min_registrations,
+            amount=event_series_price_obj.amount,
+        )
+
+    return event_obj
