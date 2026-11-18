@@ -7,6 +7,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+import payment.api.entity
 import user.api
 from comunicat.utils.email import get_module_emails_from_user
 from consent.models import EntityConsent
@@ -87,7 +88,10 @@ def sync_from_consent(entity_consent_id: UUID) -> GoogleGroupUser | None:
     google_group_user_obj, __ = GoogleGroupUser.objects.get_or_create(
         group=entity_consent_obj.newsletter.google_group,
         email=entity_consent_obj.entity.email,
-        defaults={"user": entity_consent_obj.entity.user},
+        defaults={
+            "user": entity_consent_obj.entity.user,
+            "entity": entity_consent_obj.entity,
+        },
     )
 
     try:
@@ -317,11 +321,14 @@ def sync_users(group_id: UUID | None = None) -> None:  # noqa: C901
                 except HttpError as e:
                     _log.exception(e)
 
+            entity_obj = payment.api.entity.get_entity_by_key(email=email_to_add_group)
+
             GoogleGroupUser.objects.update_or_create(
                 group=google_group_obj,
                 email=email_to_add_group,
                 defaults={
                     "user": user_by_email.get(email_to_add_group),
+                    "entity": entity_obj,
                     "role": google_group_user_role,
                 },
             )
@@ -342,11 +349,16 @@ def sync_users(group_id: UUID | None = None) -> None:  # noqa: C901
             except HttpError as e:
                 _log.exception(e)
 
+            entity_obj = payment.api.entity.get_entity_by_key(
+                email=email_to_update_group
+            )
+
             GoogleGroupUser.objects.update_or_create(
                 group=google_group_obj,
                 email=email_to_update_group,
                 defaults={
                     "user": user_by_email.get(email_to_update_group),
+                    "entity": entity_obj,
                     "role": google_group_user_role,
                 },
             )

@@ -12,6 +12,7 @@ from notify.api.slack.chat import (
 )
 from notify.api.template import (
     get_contact_message_email_render,
+    get_email_template_render,
     get_generic_email_render,
     get_order_email_render,
     get_payment_email_render,
@@ -281,6 +282,54 @@ def send_program_course_registration_email(
         )
 
     return email_objs
+
+
+@shared_task
+def send_event_reminder_email(
+    email_template_id: UUID,
+    email_type: EmailType,
+    module: Module,
+    entity_id: UUID | None = None,
+    event_id: UUID | None = None,
+    event_reminder_id: UUID | None = None,
+    email: str | None = None,
+    context: dict | None = None,
+    locale: str | None = None,
+) -> Email:
+    email_render = get_email_template_render(
+        email_template_id=email_template_id,
+        email_type=email_type,
+        module=module,
+        entity_id=entity_id,
+        event_id=event_id,
+        event_reminder_id=event_reminder_id,
+        email=email,
+        context=context,
+        locale=locale,
+    )
+
+    email_obj = Email.objects.create(
+        entity=email_render.entity_obj,
+        type=email_type,
+        subject=email_render.subject,
+        context=email_render.context,
+        module=module,
+        locale=email_render.locale,
+        status=EmailStatus.SENT,
+        template_id=email_template_id,
+    )
+
+    send_email(
+        subject=email_render.subject,
+        body=email_render.body,
+        from_email=email_render.from_email,
+        to=email_render.to_email,
+        reply_to=email_render.from_email,
+        attachments=[],
+        module=module,
+    )
+
+    return email_obj
 
 
 @shared_task
