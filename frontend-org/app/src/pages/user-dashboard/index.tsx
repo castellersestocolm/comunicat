@@ -382,6 +382,7 @@ function UserDashboardPage() {
         undefined,
         [
           EventType.GENERAL,
+          EventType.INTERNAL,
           EventType.TALK,
           EventType.GATHERING,
           EventType.COURSE,
